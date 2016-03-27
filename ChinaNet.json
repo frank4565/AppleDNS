@@ -224,8 +224,7 @@
     },
     {
         "domains": [
-            "init.itunes.apple.com",
-            "itunes.apple.com"
+            "init.itunes.apple.com"
         ],
         "ips": {
             "ChinaNet": [
