@@ -1,7 +1,17 @@
-#!/usr/bin/env python3
-import argparse
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+from __future__ import print_function, unicode_literals
+
 import json
-from collections import defaultdict
+import os.path
+import sys
+from argparse import ArgumentParser
+from collections import namedtuple
+from datetime import datetime
+from math import isnan
+from operator import attrgetter
+
+from io import open
 
 formats = {
     'hosts': '{ip:<15} {domain}',
@@ -10,39 +20,81 @@ formats = {
 }
 
 
-def find_fast_ip(ips):
-    table = defaultdict(list)
-    for item in sum(ips.values(), []):
-        table[item['ip']].append(item['delta'])
-    table = map(
-        lambda item: (item[0], sum(item[1]) / len(item[1])),
-        table.items()
-    )
-    return sorted(table, key=lambda item: item[1])[0][0]
+def check_requirements():
+    def check_python_version():
+        if sys.hexversion >= 0x2000000 and sys.hexversion <= 0x2070000:
+            print('your "python" lower than 2.7.0 upgrade.')
+            return False
+        if sys.hexversion >= 0x3000000 and sys.hexversion <= 0x3040000:
+            print('your "python" lower than 3.4.0 upgrade.')
+            return False
+        return True
+
+    return check_python_version()
+
+
+def find_fast_ip(ipset):
+    Item = namedtuple('Item', ['tag', 'ip', 'avg_rtt'])
+
+    def handle_delta(items):
+        tag, delta_map = items
+
+        def handle(item):
+            ip, delta = item
+            delta = list(item for item in delta if item != None)
+            if len(delta):
+                return Item(tag, ip, sum(delta) / float(len(delta)))
+            return Item(tag, ip, float('NaN'))
+
+        return list(map(handle, delta_map.items()))
+
+    def handle_sorted():
+        data = sum(list(map(handle_delta, ipset.items())), [])
+        return sorted(data, key=attrgetter('avg_rtt'))
+
+    iptable = handle_sorted()
+
+    if len(iptable):
+        return iptable[0]
 
 
 def export(payload, target):
-    for service in payload:
-        fast_ip = find_fast_ip(service['ips'])
-        if not fast_ip:
-            break
-        for domain in sorted(service['domains']):
-            print(formats[target].format(domain=domain, ip=fast_ip))
+    if not payload:
+        return
+    print('# Build Date: %s (UTC)' % datetime.utcnow().isoformat())
+    for service in sorted(payload, key=lambda item: item['title']):
+        tag, ip, avg_rtt = find_fast_ip(service['ips'])
+        if isnan(avg_rtt):
+            continue
+        print('# %s [%s] (Avg RTT: %.3fms)' % (service['title'], tag, avg_rtt))
+        for domain in sorted(service['domains'], key=len):
+            template = '%s' if ip else '# %s'
+            print(template % formats[target].format(domain=domain, ip=ip))
+
+
+def load_payload():
+    target_filename = 'apple-cdn-speed.report'
+    if os.path.exists(target_filename):
+        return json.load(open(target_filename, encoding='UTF-8'))
+    print('please run "fetch-timeout.py" build "%s".' % target_filename)
 
 
 def main():
-    parser = argparse.ArgumentParser()
+    parser = ArgumentParser()
     parser.add_argument(
-        '--target',
-        dest='target', 
+        'target',
         help='output target',
-        default='surge',
-        choices=formats.keys()
+        choices=sorted(formats.keys(), key=len)
     )
+
+    if len(sys.argv) == 1:
+        parser.print_help()
+        sys.exit(1)
+
     args = parser.parse_args()
-    payload = json.load(open('result.json'))
-    export(payload, args.target)
+
+    export(load_payload(), args.target)
 
 
-if __name__ == '__main__':
+if __name__ == '__main__' and check_requirements():
     main()
