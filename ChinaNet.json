@@ -49,7 +49,6 @@
     {
         "title": "API-2-ChinaCache",
         "domains": [
-            "itunes.apple.com",
             "init.itunes.apple.com"
         ],
         "ips": {
